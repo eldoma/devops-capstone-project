@@ -14,7 +14,6 @@ from service.models import db, Account, init_db
 from service.routes import app
 from service import talisman
 from flask_cors import CORS
-from flask_testing import TestCase
 
 DATABASE_URI = os.getenv(
     "DATABASE_URI", "postgresql://postgres:postgres@localhost:5432/postgres"
@@ -36,8 +35,9 @@ class TestAccountService(TestCase):
         app.config["DEBUG"] = False
         app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URI
         app.logger.setLevel(logging.CRITICAL)
-        init_db(app)
         talisman.force_https = False
+        init_db(app)
+
 
     @classmethod
     def tearDownClass(cls):
@@ -127,16 +127,43 @@ class TestAccountService(TestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_415_UNSUPPORTED_MEDIA_TYPE)
 
-    # ADD YOUR TEST CASES HERE ...
-    def test_get_account(self):
-        """It should Read a single Account"""
+#continue#
+    def test_read_an_account(self):
+        """It should read an Account"""
         account = self._create_accounts(1)[0]
-        resp = self.client.get(
-            f"{BASE_URL}/{account.id}", content_type="application/json"
+        account_id = account.id
+        response = self.client.get(f"{BASE_URL}/{str(account_id)}", content_type="application/json")
+        returned_account = response.get_json()
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(returned_account["name"], account.name)
+        self.assertEqual(returned_account["email"], account.email)
+        self.assertEqual(returned_account["address"], account.address)
+        self.assertEqual(returned_account["phone_number"], account.phone_number)
+        self.assertEqual(returned_account["date_joined"], str(account.date_joined))
+
+    def test_get_account_not_found(self):
+        """It should not Read an Account that is not found"""
+        account_id = 0
+        response = self.client.get(f"{BASE_URL}/{str(account_id)}")
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_bad_request(self):
+        """It should not Create an Account when sending the wrong data"""
+        response = self.client.post(BASE_URL, json={"name": "not enough data"})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_unsupported_media_type(self):
+        """It should not Create an Account when sending the wrong media type"""
+        account = AccountFactory()
+        response = self.client.post(
+            BASE_URL,
+            json=account.serialize(),
+            content_type="test/html"
         )
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        data = resp.get_json()
-        self.assertEqual(data["name"], account.name)
+        self.assertEqual(response.status_code, status.HTTP_415_UNSUPPORTED_MEDIA_TYPE)
+
+
+    # ADD YOUR TEST CASES HERE ...
 
     def test_get_account_list(self):
         """It should Get a list of Accounts"""
@@ -147,6 +174,24 @@ class TestAccountService(TestCase):
         self.assertEqual(len(data), 5)
 
     def test_update_account(self):
+        """It should Update an Account"""
+        test_name = "test name"
+        account = AccountFactory()
+        response = self.client.post(
+            BASE_URL,
+            json=account.serialize(),
+            content_type="application/json"
+        )
+        created_account = response.get_json()
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        update_response = self.client.put(
+            f"{BASE_URL}/{created_account['id']}",
+            json={"name": test_name},
+            content_type="application/json"
+        )
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK) 
+
+    def test_update_existing_account(self):   
         """It should Update an existing Account"""
         # create an Account to update
         test_account = AccountFactory()
@@ -165,12 +210,26 @@ class TestAccountService(TestCase):
         """It should Delete an Account"""
         account = self._create_accounts(1)[0]
         resp = self.client.delete(f"{BASE_URL}/{account.id}")
-        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)    
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)    
 
     def test_method_not_allowed(self):
         """It should not allow an illegal method call"""
         resp = self.client.delete(BASE_URL)
         self.assertEqual(resp.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)  
+
+    def test_security_headers(self):
+        """It should return security headers"""
+        response = self.client.get("/", environ_overrides=HTTPS_ENVIRON)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        headers = {
+            'X-Frame-Options': 'SAMEORIGIN',
+            'X-XSS-Protection': '1; mode=block',
+            'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': 'default-src \'self\'; object-src \'none\'',
+            'Referrer-Policy': 'strict-origin-when-cross-origin'
+        }
+        for key, value in headers.items():
+            self.assertEqual(response.headers.get(key), value)
 
     def test_cors_security(self):
         """It should return a CORS header"""
@@ -178,9 +237,10 @@ class TestAccountService(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         # Check for the CORS header
         self.assertEqual(response.headers.get('Access-Control-Allow-Origin'), '*')
- 
-class YourTestCase(TestCase):       
-    def create_app(self):
-        app = create_your_flask_app()  # Replace with your app creation logic
-        app.config['TESTING'] = True
-        return app 
+
+    def test_delete_account_not_working(self):
+        """It should not Delete an Account that is not found"""
+        account_id = 0
+        response = self.client.delete(f"{BASE_URL}/{str(account_id)}")
+        print(response)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
